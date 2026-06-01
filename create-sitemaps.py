@@ -23,11 +23,11 @@ eschol_homepage, db_conn, cursor, bucket_dir, sitemap_filenames = None, None, No
 
 
 def main():
-    """Create sitemaps for the following eScholarship entities"""
+    """Create sitemaps for various types of eSchol pages"""
     global eschol_homepage, db_conn, cursor, bucket_dir, sitemap_filenames
 
-    # Run for each environment
     for environment in ['stg', 'prd']:
+        print(f"Creating sitemaps for environment: {environment}")
 
         # Environment-specific globals
         if environment == 'stg':
@@ -92,6 +92,9 @@ def create_sitemaps_for_static_and_browse_pages():
     """Sitemap for campus, unit, and journal pages."""
     print(f"Querying data for Static and Browse pages:")
 
+    # Hardcoded: escholarship.org/campuses & /journals
+    urls = ["campuses", 'journals']
+
     print(f"Querying data for Units / Units.")
     check_connection(db_conn)
     units_query = """
@@ -101,7 +104,7 @@ def create_sitemaps_for_static_and_browse_pages():
         and id not in ('anrcs', 'lbnl');"""
     cursor.execute(units_query)
     rows = cursor.fetchall()
-    urls = [row['url'] for row in rows]
+    urls.extend([row['url'] for row in rows])
 
     print(f"Querying data for unit Units / Journals.")
     check_connection(db_conn)
@@ -128,8 +131,8 @@ def create_sitemaps_for_static_and_browse_pages():
 
     generate_urlset_sitemap(urls=urls,
                             filename=f"siteMapStatic.xml",
-                            include_lastmod=False,
-                            include_homepage=False,
+                            include_lastmod=True,
+                            include_homepage=True,
                             priority_level=None,
                             change_frequency=None)
 
@@ -199,7 +202,7 @@ def create_sitemap_index():
         doc = ET.SubElement(root, "sitemap")
         ET.SubElement(doc, "loc").text = f"{eschol_homepage}{sitemap_filename}"
 
-    filename = "SiteMapIndex.xml"
+    filename = "siteMapIndex.xml"
     if output_test_xml:
         tree = ET.ElementTree(root)
         ET.indent(tree, space=" ")
