@@ -73,18 +73,27 @@ def create_sitemaps_for_unit_types():
         check_connection(db_conn)
 
         query = f"""
-            select concat('uc/', id) as url
-            from units 
-            where type = '{unit_type['db']}' and status != 'hidden';"""
+            select
+                concat('uc/', u.id) as url,
+                DATE(max(i.updated)) as lastmod
+            from
+                units u
+                    join unit_items ui
+                        on u.id = ui.unit_id
+                    join items i
+                        on i.id = ui.item_id
+            where
+                u.type = '{unit_type['db']}'
+                and u.status != 'hidden'
+            group by
+                u.id;"""
 
         cursor.execute(query)
-        rows = cursor.fetchall()
-        urls = [row['url'] for row in rows]
+        rows = [row for row in cursor.fetchall()]
 
-        generate_urlset_sitemap(urls=urls,
+        generate_urlset_sitemap(rows=rows,
                                 filename=f"siteMap{unit_type['filename']}.xml",
                                 include_homepage=False,
-                                change_frequency="weekly",
                                 priority_level="0.7")
 
 
@@ -150,8 +159,11 @@ def create_sitemaps_for_item_pages():
 
         items_query = f"""
             select
-                case when last_indexed is null then CURRENT_DATE 
-                    else last_indexed
+                case 
+                    when updated is not null then DATE(updated)
+                    when last_indexed is not null then DATE(last_indexed)
+                    when added is not null then DATE(added) 
+                    else CURRENT_DATE
                 end as lastmod,
                 concat('uc/item/', right(id, 8)) as url
             from items
@@ -177,7 +189,7 @@ def create_sitemaps_for_item_pages():
             doc = ET.SubElement(root, "url")
             ET.SubElement(doc, "loc").text = f"{eschol_homepage}{row['url']}"
             ET.SubElement(doc, "lastmod").text = row['lastmod'].strftime("%Y-%m-%d")
-            ET.SubElement(doc, "changefreq").text = "monthly"
+            # ET.SubElement(doc, "changefreq").text = "monthly"
 
         if output_test_xml:
             tree = ET.ElementTree(root)
@@ -211,8 +223,9 @@ def create_sitemap_index():
         upload_to_s3(filename, root)
 
 
-def generate_urlset_sitemap(urls,
-                            filename,
+def generate_urlset_sitemap(filename,
+                            urls=None,
+                            rows=None,
                             include_lastmod=True,
                             include_homepage=False,
                             change_frequency=None,
@@ -220,13 +233,22 @@ def generate_urlset_sitemap(urls,
     """
     Utility for generating sitemaps in the <urlset> format.
 
-    :param urls: A list of URLS. Appended to the homepage (global var for stg/prd)
     :param filename: XML filename to be saved / sent to S3
+    :param urls: A list of URLS. Appended to the homepage (global var for stg/prd).
+        Must include either urls or rows param.
+    :param rows: Dicts including specifics for urls, lastmod
+        Must include either urls or rows param.
     :param include_lastmod: If True, includes UTC Datetime.now() as <lastmod>
     :param include_homepage: If True, includes the homepage as the first <url> element, with priority 1.0
     :param change_frequency: If provided, include as <url> subelement <changefreq>
     :param priority_level: If provided, include as <url> subelement <priority>
     """
+
+    if not rows and not urls:
+        print("WARN: No rows or units here. "
+              "This can happen with unit types having no items (e.g., Special), "
+              "but it's probably a good idea to double-check this file.")
+
     print(f"Generating XML tree for: {filename}")
     sitemap_filenames.append(filename)
 
@@ -238,19 +260,30 @@ def generate_urlset_sitemap(urls,
     if include_homepage:
         doc = ET.SubElement(root, "url")
         ET.SubElement(doc, "loc").text = eschol_homepage
-        ET.SubElement(doc, "lastmod").text = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        ET.SubElement(doc, "changefreq").text = "weekly"
+        ET.SubElement(doc, "lastmod").text = datetime.now(timezone.utc).strftime("%Y-%m-%d")
         ET.SubElement(doc, "priority").text = "1.0"
 
-    for url in urls:
-        doc = ET.SubElement(root, "url")
-        ET.SubElement(doc, "loc").text = f"{eschol_homepage}{url}"
-        if include_lastmod:
-            ET.SubElement(doc, "lastmod").text = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
-        if change_frequency:
-            ET.SubElement(doc, "changefreq").text = change_frequency
-        if priority_level:
-            ET.SubElement(doc, "priority").text = "0.7"
+    if urls:
+        for url in urls:
+            doc = ET.SubElement(root, "url")
+            ET.SubElement(doc, "loc").text = f"{eschol_homepage}{url}"
+            if include_lastmod:
+                ET.SubElement(doc, "lastmod").text = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+            if change_frequency:
+                ET.SubElement(doc, "changefreq").text = change_frequency
+            if priority_level:
+                ET.SubElement(doc, "priority").text = "0.7"
+
+    elif rows:
+        for row in rows:
+            doc = ET.SubElement(root, "url")
+            ET.SubElement(doc, "loc").text = f"{eschol_homepage}{row['url']}"
+            if include_lastmod:
+                ET.SubElement(doc, "lastmod").text = row['lastmod'].strftime("%Y-%m-%d")
+            if change_frequency:
+                ET.SubElement(doc, "changefreq").text = change_frequency
+            if priority_level:
+                ET.SubElement(doc, "priority").text = "0.7"
 
     if output_test_xml:
         tree = ET.ElementTree(root)
